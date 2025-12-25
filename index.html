@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Elf & Presents</title>
+  <title>Elf & Presents (Rick Roll Edition)</title>
   <style>
     html, body { height: 100%; margin: 0; background:#0b1020; display:grid; place-items:center; }
     canvas { image-rendering: pixelated; image-rendering: crisp-edges; border: 2px solid #2b3355; background:#0f1730; }
@@ -20,11 +20,11 @@
       padding:2px 6px; border-radius:6px; font-weight:600;
     }
 
-    /* PDF overlay */
+    /* Video overlay */
     .overlay {
       position: fixed; inset: 0;
       display: none;
-      background: rgba(0,0,0,0.65);
+      background: rgba(0,0,0,0.70);
       align-items: center;
       justify-content: center;
       padding: 18px;
@@ -33,7 +33,7 @@
     .overlay.show { display: flex; }
     .modal {
       width: min(900px, 96vw);
-      height: min(600px, 86vh);
+      height: min(560px, 86vh);
       background: #0f1730;
       border: 2px solid #2b3355;
       border-radius: 12px;
@@ -60,7 +60,7 @@
       font-weight:600;
     }
     .btn:hover { filter: brightness(1.08); }
-    .pdfFrame { width: 100%; height: 100%; border: 0; background: #0f1730; }
+    .frame { width: 100%; height: 100%; border: 0; background: #0f1730; }
   </style>
 </head>
 <body>
@@ -71,16 +71,18 @@
     </div>
   </div>
 
+  <!-- Rick Roll Overlay -->
   <div class="overlay" id="overlay">
     <div class="modal">
       <div class="modalHeader">
-        <div><b>🎁 Correct Gift!</b> (opening <code>gift.pdf</code>)</div>
+        <div><b>🎁 Correct Gift!</b> (uh oh…)</div>
         <div style="display:flex; gap:10px;">
           <button class="btn" id="openNewTabBtn">Open in new tab</button>
           <button class="btn" id="closeBtn">Close</button>
         </div>
       </div>
-      <iframe class="pdfFrame" id="pdfFrame" title="Gift PDF"></iframe>
+      <iframe class="frame" id="videoFrame" title="Totally the gift"
+        allow="autoplay; encrypted-media" allowfullscreen></iframe>
     </div>
   </div>
 
@@ -89,28 +91,29 @@
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
 
-  // PDF overlay
+  // Rick Roll links
+  const RICKROLL_WATCH_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  const RICKROLL_EMBED_URL = "https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1";
+
+  // Overlay elements
   const overlay = document.getElementById("overlay");
   const closeBtn = document.getElementById("closeBtn");
   const openNewTabBtn = document.getElementById("openNewTabBtn");
-  const pdfFrame = document.getElementById("pdfFrame");
+  const videoFrame = document.getElementById("videoFrame");
 
-  // Put a PDF named "gift.pdf" next to this HTML file
-  const GIFT_PDF_URL = "gift.pdf";
-
-  function showPdfOverlay() {
-    pdfFrame.src = GIFT_PDF_URL;
+  function showVideoOverlay() {
+    videoFrame.src = RICKROLL_EMBED_URL;
     overlay.classList.add("show");
   }
-  function hidePdfOverlay() {
+  function hideVideoOverlay() {
     overlay.classList.remove("show");
-    pdfFrame.src = "about:blank";
+    videoFrame.src = "about:blank";
   }
-  closeBtn.addEventListener("click", hidePdfOverlay);
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) hidePdfOverlay(); });
-  openNewTabBtn.addEventListener("click", () => window.open(GIFT_PDF_URL, "_blank", "noopener,noreferrer"));
+  closeBtn.addEventListener("click", hideVideoOverlay);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) hideVideoOverlay(); });
+  openNewTabBtn.addEventListener("click", () => window.open(RICKROLL_WATCH_URL, "_blank", "noopener,noreferrer"));
 
-  // Scale canvas up crisply
+  // Scale up crisply
   const BASE_W = canvas.width, BASE_H = canvas.height;
   function fit() {
     const maxW = Math.min(640, window.innerWidth * 0.94);
@@ -138,7 +141,7 @@
   // Elf
   const elf = { x: 152, y: 200, w: 12, h: 14, speed: 70, dir: "up", step: 0, stepTimer: 0 };
 
-  // ✅ 4 presents: 3 wrong, 1 correct
+  // 4 presents: 3 wrong, 1 correct
   const presents = [
     { x:  70, y:  70, w: 14, h: 12, opened:false, openAnim:0, kind:"wrong"   },
     { x: 230, y:  80, w: 14, h: 12, opened:false, openAnim:0, kind:"wrong"   },
@@ -146,7 +149,7 @@
     { x: 154, y:  70, w: 14, h: 12, opened:false, openAnim:0, kind:"correct" },
   ];
 
-  // Some trees (walls)
+  // Trees/walls
   const walls = [
     {x: 40, y: 40, w: 18, h: 18},
     {x: 260, y: 54, w: 18, h: 18},
@@ -185,7 +188,7 @@
   });
 
   function update(dt) {
-    // Freeze movement while PDF overlay is open
+    // Freeze movement while overlay is open
     if (overlay.classList.contains("show")) return;
 
     // Movement
@@ -208,13 +211,13 @@
 
       const next = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
 
-      // X move
+      // X
       next.x = clamp(next.x + mx * elf.speed * dt, 2, 320 - elf.w - 2);
       let blockedX = false;
       for (const w of walls) if (rectsOverlap(next, w)) { blockedX = true; break; }
       if (!blockedX) elf.x = next.x;
 
-      // Y move
+      // Y
       next.x = elf.x;
       next.y = clamp(next.y + my * elf.speed * dt, 2, 240 - elf.h - 2);
       let blockedY = false;
@@ -234,14 +237,14 @@
       if (bannerTimer <= 0) { bannerText = ""; bannerTimer = 0; }
     }
 
-    // Interact on E
+    // Interact (E)
     if (keys.has("e")) {
       const elfRect = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
 
       for (const p of presents) {
         if (p.opened) continue;
-        const zone = { x: p.x - 6, y: p.y - 6, w: p.w + 12, h: p.h + 12 };
 
+        const zone = { x: p.x - 6, y: p.y - 6, w: p.w + 12, h: p.h + 12 };
         if (rectsOverlap(elfRect, zone)) {
           p.opened = true;
           p.openAnim = 0;
@@ -250,15 +253,19 @@
           if (p.kind === "wrong") {
             showBanner("OOPS WRONG GIFT!", 2.4);
           } else {
-            showBanner("YES! CORRECT GIFT!", 1.2);
-            setTimeout(showPdfOverlay, 350);
+            showBanner("YES! CORRECT GIFT!", 1.0);
+
+            // Try overlay first (fun). If autoplay/embed is blocked, new tab button is there.
+            setTimeout(() => {
+              showVideoOverlay();
+            }, 350);
           }
           break;
         }
       }
     }
 
-    // Present opening animation
+    // Present open animations
     for (const p of presents) {
       if (p.opened && p.openAnim < 1) {
         p.openAnim = Math.min(1, p.openAnim + dt * 2.2);
@@ -290,7 +297,7 @@
     // Trees
     for (const w of walls) drawTree(w.x, w.y);
 
-    // ✅ Draw ALL presents
+    // Presents (ALL of them)
     for (const p of presents) drawPresent(p);
 
     // Elf
@@ -303,7 +310,7 @@
       ctx.fillRect(p.x|0, p.y|0, p.size, p.size);
     }
 
-    // Prompt if near any unopened present
+    // Prompt near any unopened present
     const elfRect = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
     for (const p of presents) {
       if (p.opened) continue;
@@ -364,7 +371,7 @@
     ctx.fillStyle = "rgba(0,0,0,0.18)";
     ctx.fillRect(p.x+1, p.y+9, p.w, 4);
 
-    // Wrong gifts are blue, correct is red
+    // Wrong gifts are blue, correct is red (remove this if you want them to look identical)
     const boxColor = (p.kind === "correct") ? "#c4312f" : "#2f6fd6";
     const lidColor = (p.kind === "correct") ? "#b12828" : "#285fb6";
 
@@ -386,6 +393,7 @@
       ctx.fillRect((p.x-1 + shrink/2)|0, (p.y - lift)|0, (p.w+2 - shrink)|0, 4);
     }
 
+    // Bow
     ctx.fillStyle = "#f6e07a";
     ctx.fillRect(p.x + (p.w/2|0) - 3, p.y - 1, 2, 2);
     ctx.fillRect(p.x + (p.w/2|0) + 1, p.y - 1, 2, 2);
@@ -393,39 +401,50 @@
 
   function drawElf(e) {
     const step = e.step;
+
+    // shadow
     ctx.fillStyle = "rgba(0,0,0,0.18)";
     ctx.fillRect((e.x+2)|0, (e.y+12)|0, 8, 3);
 
+    // boots
     ctx.fillStyle = "#4a2b1b";
     ctx.fillRect((e.x+2)|0, (e.y+11 + step)|0, 3, 3);
     ctx.fillRect((e.x+7)|0, (e.y+11 + (1-step))|0, 3, 3);
 
+    // dress
     ctx.fillStyle = "#2aa24b";
     ctx.fillRect((e.x+2)|0, (e.y+6)|0, 8, 6);
 
+    // belt
     ctx.fillStyle = "#1a1a1a";
     ctx.fillRect((e.x+2)|0, (e.y+9)|0, 8, 1);
 
+    // arms
     ctx.fillStyle = "#2fbd57";
     ctx.fillRect((e.x+1)|0, (e.y+7)|0, 1, 2);
     ctx.fillRect((e.x+10)|0, (e.y+7)|0, 1, 2);
 
+    // face
     ctx.fillStyle = "#ffd7c7";
     ctx.fillRect((e.x+3)|0, (e.y+2)|0, 6, 4);
 
+    // hair
     ctx.fillStyle = "#d2462e";
     ctx.fillRect((e.x+2)|0, (e.y+1)|0, 8, 3);
     ctx.fillRect((e.x+2)|0, (e.y+2)|0, 1, 3);
     ctx.fillRect((e.x+9)|0, (e.y+2)|0, 1, 3);
 
+    // hat
     ctx.fillStyle = "#1f7a3a";
     ctx.fillRect((e.x+4)|0, (e.y)|0, 4, 2);
     ctx.fillRect((e.x+7)|0, (e.y+1)|0, 2, 1);
 
+    // eyes
     ctx.fillStyle = "#1a2240";
     ctx.fillRect((e.x+4)|0, (e.y+3)|0, 1, 1);
     ctx.fillRect((e.x+7)|0, (e.y+3)|0, 1, 1);
 
+    // tiny direction pixel
     ctx.fillStyle = "#f2b6a0";
     if (e.dir === "up") ctx.fillRect((e.x+6)|0, (e.y+2)|0, 1, 1);
     if (e.dir === "down") ctx.fillRect((e.x+6)|0, (e.y+5)|0, 1, 1);
