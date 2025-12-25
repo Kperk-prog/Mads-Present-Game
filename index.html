@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Elf & Present (Top-Down 16-bit-ish)</title>
+  <title>Elf & Presents (Top-Down 16-bit-ish)</title>
   <style>
     html, body { height: 100%; margin: 0; background:#0b1020; display:grid; place-items:center; }
     canvas { image-rendering: pixelated; image-rendering: crisp-edges; border: 2px solid #2b3355; background:#0f1730; }
@@ -19,6 +19,53 @@
       background:#1e2644; border:1px solid #3a4475; border-bottom-color:#252f57;
       padding:2px 6px; border-radius:6px; font-weight:600;
     }
+
+    /* Simple modal overlay for PDF */
+    .overlay {
+      position: fixed; inset: 0;
+      display: none;
+      background: rgba(0,0,0,0.65);
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      z-index: 999;
+    }
+    .overlay.show { display: flex; }
+    .modal {
+      width: min(900px, 96vw);
+      height: min(600px, 86vh);
+      background: #0f1730;
+      border: 2px solid #2b3355;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 14px 60px rgba(0,0,0,0.55);
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+    .modalHeader {
+      display:flex; align-items:center; justify-content:space-between;
+      padding: 10px 12px;
+      background: #0b1020;
+      border-bottom: 1px solid #2b3355;
+      color: #cfe3ff;
+      font: 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    .btn {
+      cursor: pointer;
+      background:#1e2644;
+      border:1px solid #3a4475;
+      color:#cfe3ff;
+      padding:6px 10px;
+      border-radius:10px;
+      font-weight:600;
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .pdfFrame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #0f1730;
+    }
   </style>
 </head>
 <body>
@@ -29,12 +76,48 @@
     </div>
   </div>
 
+  <!-- PDF Overlay -->
+  <div class="overlay" id="overlay">
+    <div class="modal">
+      <div class="modalHeader">
+        <div><b>🎁 Correct Gift!</b> (showing <code>gift.pdf</code>)</div>
+        <div style="display:flex; gap:10px;">
+          <button class="btn" id="openNewTabBtn">Open in new tab</button>
+          <button class="btn" id="closeBtn">Close</button>
+        </div>
+      </div>
+      <iframe class="pdfFrame" id="pdfFrame" title="Gift PDF"></iframe>
+    </div>
+  </div>
+
 <script>
 (() => {
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
 
-  // Scale the "pixel" look up on bigger screens while keeping crisp pixels
+  // Overlay elements
+  const overlay = document.getElementById("overlay");
+  const closeBtn = document.getElementById("closeBtn");
+  const openNewTabBtn = document.getElementById("openNewTabBtn");
+  const pdfFrame = document.getElementById("pdfFrame");
+
+  // IMPORTANT: put a safe PDF named "gift.pdf" next to this HTML file.
+  // If you host this online, this should be a real URL to the PDF.
+  const GIFT_PDF_URL = "gift.pdf";
+
+  function showPdfOverlay() {
+    pdfFrame.src = GIFT_PDF_URL;
+    overlay.classList.add("show");
+  }
+  function hidePdfOverlay() {
+    overlay.classList.remove("show");
+    pdfFrame.src = "about:blank";
+  }
+  closeBtn.addEventListener("click", hidePdfOverlay);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) hidePdfOverlay(); });
+  openNewTabBtn.addEventListener("click", () => window.open(GIFT_PDF_URL, "_blank", "noopener,noreferrer"));
+
+  // Scale the "pixel" look up
   const BASE_W = canvas.width, BASE_H = canvas.height;
   function fit() {
     const maxW = Math.min(640, window.innerWidth * 0.94);
@@ -50,43 +133,36 @@
   const keys = new Set();
   window.addEventListener("keydown", (e) => {
     keys.add(e.key.toLowerCase());
-    // prevent page scrolling for arrows
     if (["arrowup","arrowdown","arrowleft","arrowright"," "].includes(e.key.toLowerCase())) e.preventDefault();
   });
   window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
-
-  // World
-  const world = {
-    w: BASE_W,
-    h: BASE_H,
-    // snowy tiles just for vibe
-    tile: 16
-  };
 
   // Utility
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const rectsOverlap = (a,b) =>
     a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
-  // Elf sprite (tiny pixel character)
-  const elf = {
-    x: 152, y: 200,
-    w: 12, h: 14,
-    speed: 70, // px/s
-    dir: "up", // for animation
-    step: 0,
-    stepTimer: 0
-  };
+  // Elf
+  const elf = { x: 152, y: 200, w: 12, h: 14, speed: 70, dir: "up", step: 0, stepTimer: 0 };
 
-  const present = {
-    x: 154, y: 70,
-    w: 14, h: 12,
-    opened: false,
-    openAnim: 0 // 0..1
-  };
+  // 4 presents: 3 wrong, 1 correct
+  const presents = [
+    { x:  70, y:  70, w: 14, h: 12, opened:false, openAnim:0, kind:"wrong"   },
+    { x: 230, y:  80, w: 14, h: 12, opened:false, openAnim:0, kind:"wrong"   },
+    { x:  90, y: 150, w: 14, h: 12, opened:false, openAnim:0, kind:"wrong"   },
+    { x: 154, y:  70, w: 14, h: 12, opened:false, openAnim:0, kind:"correct" },
+  ];
+
+  // Message system
+  let bannerText = "";
+  let bannerTimer = 0; // seconds
+
+  function showBanner(text, seconds=2.2) {
+    bannerText = text;
+    bannerTimer = seconds;
+  }
 
   const particles = [];
-
   function spawnSparkles(cx, cy, n=18) {
     for (let i=0;i<n;i++){
       particles.push({
@@ -101,7 +177,7 @@
     }
   }
 
-  // Simple collision walls (a couple trees so it feels like a "map")
+  // Walls/trees
   const walls = [
     {x: 40, y: 40, w: 18, h: 18},
     {x: 260, y: 54, w: 18, h: 18},
@@ -109,20 +185,22 @@
     {x: 242, y: 170, w: 18, h: 18},
   ];
 
-  // Game loop
   let last = performance.now();
-  function loop(now) {
+  requestAnimationFrame(function loop(now){
     const dt = Math.min(0.033, (now - last) / 1000);
     last = now;
-
     update(dt);
     draw();
-
     requestAnimationFrame(loop);
-  }
-  requestAnimationFrame(loop);
+  });
 
   function update(dt) {
+    // If PDF overlay is up, freeze game input/movement
+    if (overlay.classList.contains("show")) {
+      // still animate particles slowly if you want; here we just keep them static
+      return;
+    }
+
     // Movement
     let mx = 0, my = 0;
     const up = keys.has("w") || keys.has("arrowup");
@@ -138,133 +216,138 @@
       const len = Math.hypot(mx, my) || 1;
       mx /= len; my /= len;
 
-      // Direction preference for animation
       if (Math.abs(my) >= Math.abs(mx)) elf.dir = (my < 0 ? "up" : "down");
       else elf.dir = (mx < 0 ? "left" : "right");
 
-      // Attempt move with simple axis separation
       const next = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
       next.x += mx * elf.speed * dt;
-      next.x = clamp(next.x, 2, world.w - elf.w - 2);
+      next.x = clamp(next.x, 2, 320 - elf.w - 2);
 
-      // collide X
       let blockedX = false;
-      for (const w of walls) {
-        if (rectsOverlap(next, w)) { blockedX = true; break; }
-      }
+      for (const w of walls) if (rectsOverlap(next, w)) { blockedX = true; break; }
       if (!blockedX) elf.x = next.x;
 
       next.x = elf.x;
       next.y += my * elf.speed * dt;
-      next.y = clamp(next.y, 2, world.h - elf.h - 2);
+      next.y = clamp(next.y, 2, 240 - elf.h - 2);
 
-      // collide Y
       let blockedY = false;
-      for (const w of walls) {
-        if (rectsOverlap(next, w)) { blockedY = true; break; }
-      }
+      for (const w of walls) if (rectsOverlap(next, w)) { blockedY = true; break; }
       if (!blockedY) elf.y = next.y;
 
-      // walk animation timing
       elf.stepTimer += dt;
-      if (elf.stepTimer > 0.12) {
-        elf.stepTimer = 0;
-        elf.step = (elf.step + 1) % 2;
-      }
+      if (elf.stepTimer > 0.12) { elf.stepTimer = 0; elf.step = (elf.step + 1) % 2; }
     } else {
-      elf.step = 0;
-      elf.stepTimer = 0;
+      elf.step = 0; elf.stepTimer = 0;
     }
 
-    // Open present when near and pressing E
-    const e = keys.has("e");
-    if (e && !present.opened) {
-      // "interaction zone" slightly bigger than present
-      const zone = { x: present.x - 6, y: present.y - 6, w: present.w + 12, h: present.h + 12 };
+    // Banner timer
+    if (bannerTimer > 0) {
+      bannerTimer -= dt;
+      if (bannerTimer <= 0) { bannerText = ""; bannerTimer = 0; }
+    }
+
+    // Interact (E)
+    if (keys.has("e")) {
       const elfRect = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
-      if (rectsOverlap(elfRect, zone)) {
-        present.opened = true;
-        present.openAnim = 0;
-        spawnSparkles(present.x + present.w/2, present.y + present.h/2);
+
+      for (const p of presents) {
+        if (p.opened) continue;
+
+        const zone = { x: p.x - 6, y: p.y - 6, w: p.w + 12, h: p.h + 12 };
+        if (rectsOverlap(elfRect, zone)) {
+          // Open it
+          p.opened = true;
+          p.openAnim = 0;
+          spawnSparkles(p.x + p.w/2, p.y + p.h/2);
+
+          if (p.kind === "wrong") {
+            showBanner("OOPS WRONG GIFT!", 2.4);
+          } else {
+            showBanner("YES! CORRECT GIFT!", 1.2);
+            // show the PDF after a tiny beat
+            setTimeout(() => showPdfOverlay(), 350);
+          }
+          break;
+        }
       }
     }
 
-    // Present open animation
-    if (present.opened && present.openAnim < 1) {
-      present.openAnim = Math.min(1, present.openAnim + dt * 2.2);
-      if (Math.random() < 0.12) {
-        spawnSparkles(present.x + present.w/2, present.y + present.h/2, 2);
+    // Present open animations
+    for (const p of presents) {
+      if (p.opened && p.openAnim < 1) {
+        p.openAnim = Math.min(1, p.openAnim + dt * 2.2);
+        if (Math.random() < 0.08) spawnSparkles(p.x + p.w/2, p.y + p.h/2, 1);
       }
     }
 
     // Particles
     for (let i = particles.length - 1; i >= 0; i--) {
-      const p = particles[i];
-      p.t += dt;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vy += 140 * dt; // gravity
-      if (p.t >= p.life) particles.splice(i, 1);
+      const q = particles[i];
+      q.t += dt;
+      q.x += q.vx * dt;
+      q.y += q.vy * dt;
+      q.vy += 140 * dt;
+      if (q.t >= q.life) particles.splice(i, 1);
     }
   }
 
   function draw() {
-    // Background: snowy tiles
-    ctx.clearRect(0,0,world.w,world.h);
-    for (let y=0; y<world.h; y+=world.tile){
-      for (let x=0; x<world.w; x+=world.tile){
-        const alt = ((x/world.tile + y/world.tile) % 2) === 0;
+    // Snow tiles
+    for (let y=0; y<240; y+=16){
+      for (let x=0; x<320; x+=16){
+        const alt = ((x/16 + y/16) % 2) === 0;
         ctx.fillStyle = alt ? "#e6f3ff" : "#d7ecff";
-        ctx.fillRect(x,y,world.tile,world.tile);
-
-        // tiny blue shadows flecks
-        if (alt && Math.random() < 0.03) {
-          ctx.fillStyle = "rgba(40,80,160,0.18)";
-          ctx.fillRect(x + 2 + (Math.random()*10|0), y + 2 + (Math.random()*10|0), 2, 2);
-        }
+        ctx.fillRect(x,y,16,16);
       }
     }
 
-    // Draw "trees" (walls)
+    // Trees
     for (const w of walls) drawTree(w.x, w.y);
 
-    // Draw present
-    drawPresent(present);
+    // Presents
+    for (const p of presents) drawPresent(p);
 
-    // Draw elf
+    // Elf
     drawElf(elf);
 
-    // UI prompt near present if close and not opened
-    if (!present.opened) {
-      const zone = { x: present.x - 10, y: present.y - 10, w: present.w + 20, h: present.h + 20 };
-      const elfRect = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
-      if (rectsOverlap(elfRect, zone)) {
-        drawTextCentered("Press E to open!", present.x + present.w/2, present.y - 10);
-      }
-    } else if (present.openAnim >= 1) {
-      drawTextCentered("🎁 Opened!", present.x + present.w/2, present.y - 10);
-    }
-
-    // Particles (sparkles)
+    // Sparkles
     for (const p of particles) {
       const a = 1 - (p.t / p.life);
       ctx.fillStyle = `rgba(255, 246, 180, ${a})`;
       ctx.fillRect(p.x|0, p.y|0, p.size, p.size);
-      // little cross sparkle sometimes
-      if (a > 0.6 && (p.t * 60 % 8) < 1) {
-        ctx.fillRect((p.x-2)|0, (p.y)|0, 1, 1);
-        ctx.fillRect((p.x+2)|0, (p.y)|0, 1, 1);
-        ctx.fillRect((p.x)|0, (p.y-2)|0, 1, 1);
-        ctx.fillRect((p.x)|0, (p.y+2)|0, 1, 1);
+    }
+
+    // Interaction prompts for nearby unopened presents
+    const elfRect = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
+    for (const p of presents) {
+      if (p.opened) continue;
+      const zone = { x: p.x - 10, y: p.y - 10, w: p.w + 20, h: p.h + 20 };
+      if (rectsOverlap(elfRect, zone)) {
+        drawTextCentered("Press E to open!", p.x + p.w/2, p.y - 10);
+        break;
       }
     }
 
-    // Subtle vignette
-    const g = ctx.createRadialGradient(world.w/2, world.h/2, 40, world.w/2, world.h/2, 170);
+    // Banner text
+    if (bannerText) {
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(0, 0, 320, 18);
+      ctx.font = "10px monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(bannerText, 160, 9);
+      ctx.restore();
+    }
+
+    // Vignette
+    const g = ctx.createRadialGradient(160, 120, 40, 160, 120, 170);
     g.addColorStop(0, "rgba(0,0,0,0)");
     g.addColorStop(1, "rgba(0,0,0,0.25)");
     ctx.fillStyle = g;
-    ctx.fillRect(0,0,world.w,world.h);
+    ctx.fillRect(0,0,320,240);
   }
 
   function drawTextCentered(text, x, y) {
@@ -272,7 +355,6 @@
     ctx.font = "10px monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    // shadow
     ctx.fillStyle = "rgba(0,0,0,0.6)";
     ctx.fillText(text, x+1, y+1);
     ctx.fillStyle = "#1a2240";
@@ -281,104 +363,84 @@
   }
 
   function drawTree(x, y) {
-    // trunk
     ctx.fillStyle = "#6b3f2a";
     ctx.fillRect(x+7, y+11, 4, 6);
-    // leaves
     ctx.fillStyle = "#1f7a3a";
     ctx.fillRect(x+2, y+2, 14, 10);
     ctx.fillStyle = "#2aa24b";
     ctx.fillRect(x+4, y+4, 10, 6);
-    // snow cap
     ctx.fillStyle = "#f3fbff";
     ctx.fillRect(x+3, y+1, 12, 3);
-    // collision outline hint
     ctx.fillStyle = "rgba(0,0,0,0.12)";
     ctx.fillRect(x, y, 18, 18);
   }
 
   function drawPresent(p) {
-    // shadow
     ctx.fillStyle = "rgba(0,0,0,0.18)";
     ctx.fillRect(p.x+1, p.y+9, p.w, 4);
 
-    // box
-    ctx.fillStyle = "#c4312f"; // red
+    // Color-code wrong vs correct slightly (still festive)
+    const boxColor = (p.kind === "correct") ? "#c4312f" : "#2f6fd6";
+    const lidColor = (p.kind === "correct") ? "#b12828" : "#285fb6";
+
+    ctx.fillStyle = boxColor;
     ctx.fillRect(p.x, p.y+2, p.w, p.h);
 
-    // ribbon
-    ctx.fillStyle = "#f0d35a"; // gold
+    ctx.fillStyle = "#f0d35a";
     ctx.fillRect(p.x + (p.w/2|0) - 1, p.y+2, 2, p.h);
     ctx.fillRect(p.x, p.y + 6, p.w, 2);
 
-    // lid (opens)
-    const t = p.openAnim; // 0..1
+    const t = p.openAnim;
     if (!p.opened) {
-      ctx.fillStyle = "#b12828";
+      ctx.fillStyle = lidColor;
       ctx.fillRect(p.x-1, p.y, p.w+2, 4);
     } else {
-      // lid flips upward (simple fake: move + shrink)
       const lift = (t * 10);
       const shrink = (t * 6);
-      ctx.fillStyle = "#b12828";
+      ctx.fillStyle = lidColor;
       ctx.fillRect((p.x-1 + shrink/2)|0, (p.y - lift)|0, (p.w+2 - shrink)|0, 4);
     }
 
-    // bow
     ctx.fillStyle = "#f6e07a";
     ctx.fillRect(p.x + (p.w/2|0) - 3, p.y - 1, 2, 2);
     ctx.fillRect(p.x + (p.w/2|0) + 1, p.y - 1, 2, 2);
   }
 
   function drawElf(e) {
-    // Tiny top-down pixel sprite:
-    // - green dress, red hair, pale face, brown boots
-    // - step animation: feet swap 1px
     const step = e.step;
-
-    // shadow
     ctx.fillStyle = "rgba(0,0,0,0.18)";
     ctx.fillRect((e.x+2)|0, (e.y+12)|0, 8, 3);
 
-    // boots
     ctx.fillStyle = "#4a2b1b";
     ctx.fillRect((e.x+2)|0, (e.y+11 + step)|0, 3, 3);
     ctx.fillRect((e.x+7)|0, (e.y+11 + (1-step))|0, 3, 3);
 
-    // dress/body
     ctx.fillStyle = "#2aa24b";
     ctx.fillRect((e.x+2)|0, (e.y+6)|0, 8, 6);
 
-    // belt
     ctx.fillStyle = "#1a1a1a";
     ctx.fillRect((e.x+2)|0, (e.y+9)|0, 8, 1);
 
-    // arms (tiny)
     ctx.fillStyle = "#2fbd57";
     ctx.fillRect((e.x+1)|0, (e.y+7)|0, 1, 2);
     ctx.fillRect((e.x+10)|0, (e.y+7)|0, 1, 2);
 
-    // face
     ctx.fillStyle = "#ffd7c7";
     ctx.fillRect((e.x+3)|0, (e.y+2)|0, 6, 4);
 
-    // hair (red)
     ctx.fillStyle = "#d2462e";
     ctx.fillRect((e.x+2)|0, (e.y+1)|0, 8, 3);
     ctx.fillRect((e.x+2)|0, (e.y+2)|0, 1, 3);
     ctx.fillRect((e.x+9)|0, (e.y+2)|0, 1, 3);
 
-    // hat (elf green cap)
     ctx.fillStyle = "#1f7a3a";
     ctx.fillRect((e.x+4)|0, (e.y)|0, 4, 2);
     ctx.fillRect((e.x+7)|0, (e.y+1)|0, 2, 1);
 
-    // eyes (tiny dots)
     ctx.fillStyle = "#1a2240";
     ctx.fillRect((e.x+4)|0, (e.y+3)|0, 1, 1);
     ctx.fillRect((e.x+7)|0, (e.y+3)|0, 1, 1);
 
-    // direction indicator: tiny “nose” pixel
     ctx.fillStyle = "#f2b6a0";
     if (e.dir === "up") ctx.fillRect((e.x+6)|0, (e.y+2)|0, 1, 1);
     if (e.dir === "down") ctx.fillRect((e.x+6)|0, (e.y+5)|0, 1, 1);
