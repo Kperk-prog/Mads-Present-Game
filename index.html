@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Elf & Presents (Top-Down 16-bit-ish)</title>
+  <title>Elf & Presents</title>
   <style>
     html, body { height: 100%; margin: 0; background:#0b1020; display:grid; place-items:center; }
     canvas { image-rendering: pixelated; image-rendering: crisp-edges; border: 2px solid #2b3355; background:#0f1730; }
@@ -20,7 +20,7 @@
       padding:2px 6px; border-radius:6px; font-weight:600;
     }
 
-    /* Simple modal overlay for PDF */
+    /* PDF overlay */
     .overlay {
       position: fixed; inset: 0;
       display: none;
@@ -60,27 +60,21 @@
       font-weight:600;
     }
     .btn:hover { filter: brightness(1.08); }
-    .pdfFrame {
-      width: 100%;
-      height: 100%;
-      border: 0;
-      background: #0f1730;
-    }
+    .pdfFrame { width: 100%; height: 100%; border: 0; background: #0f1730; }
   </style>
 </head>
 <body>
   <div>
     <canvas id="game" width="320" height="240"></canvas>
     <div class="hud">
-      Move: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or Arrow Keys • Open present: <kbd>E</kbd>
+      Move: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / Arrows • Open: <kbd>E</kbd>
     </div>
   </div>
 
-  <!-- PDF Overlay -->
   <div class="overlay" id="overlay">
     <div class="modal">
       <div class="modalHeader">
-        <div><b>🎁 Correct Gift!</b> (showing <code>gift.pdf</code>)</div>
+        <div><b>🎁 Correct Gift!</b> (opening <code>gift.pdf</code>)</div>
         <div style="display:flex; gap:10px;">
           <button class="btn" id="openNewTabBtn">Open in new tab</button>
           <button class="btn" id="closeBtn">Close</button>
@@ -95,14 +89,13 @@
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
 
-  // Overlay elements
+  // PDF overlay
   const overlay = document.getElementById("overlay");
   const closeBtn = document.getElementById("closeBtn");
   const openNewTabBtn = document.getElementById("openNewTabBtn");
   const pdfFrame = document.getElementById("pdfFrame");
 
-  // IMPORTANT: put a safe PDF named "gift.pdf" next to this HTML file.
-  // If you host this online, this should be a real URL to the PDF.
+  // Put a PDF named "gift.pdf" next to this HTML file
   const GIFT_PDF_URL = "gift.pdf";
 
   function showPdfOverlay() {
@@ -117,7 +110,7 @@
   overlay.addEventListener("click", (e) => { if (e.target === overlay) hidePdfOverlay(); });
   openNewTabBtn.addEventListener("click", () => window.open(GIFT_PDF_URL, "_blank", "noopener,noreferrer"));
 
-  // Scale the "pixel" look up
+  // Scale canvas up crisply
   const BASE_W = canvas.width, BASE_H = canvas.height;
   function fit() {
     const maxW = Math.min(640, window.innerWidth * 0.94);
@@ -137,7 +130,7 @@
   });
   window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 
-  // Utility
+  // Helpers
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const rectsOverlap = (a,b) =>
     a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -145,7 +138,7 @@
   // Elf
   const elf = { x: 152, y: 200, w: 12, h: 14, speed: 70, dir: "up", step: 0, stepTimer: 0 };
 
-  // 4 presents: 3 wrong, 1 correct
+  // ✅ 4 presents: 3 wrong, 1 correct
   const presents = [
     { x:  70, y:  70, w: 14, h: 12, opened:false, openAnim:0, kind:"wrong"   },
     { x: 230, y:  80, w: 14, h: 12, opened:false, openAnim:0, kind:"wrong"   },
@@ -153,15 +146,20 @@
     { x: 154, y:  70, w: 14, h: 12, opened:false, openAnim:0, kind:"correct" },
   ];
 
-  // Message system
+  // Some trees (walls)
+  const walls = [
+    {x: 40, y: 40, w: 18, h: 18},
+    {x: 260, y: 54, w: 18, h: 18},
+    {x: 62, y: 150, w: 18, h: 18},
+    {x: 242, y: 170, w: 18, h: 18},
+  ];
+
+  // Banner message
   let bannerText = "";
-  let bannerTimer = 0; // seconds
+  let bannerTimer = 0;
+  function showBanner(text, seconds=2.2) { bannerText = text; bannerTimer = seconds; }
 
-  function showBanner(text, seconds=2.2) {
-    bannerText = text;
-    bannerTimer = seconds;
-  }
-
+  // Sparkles
   const particles = [];
   function spawnSparkles(cx, cy, n=18) {
     for (let i=0;i<n;i++){
@@ -177,14 +175,6 @@
     }
   }
 
-  // Walls/trees
-  const walls = [
-    {x: 40, y: 40, w: 18, h: 18},
-    {x: 260, y: 54, w: 18, h: 18},
-    {x: 62, y: 150, w: 18, h: 18},
-    {x: 242, y: 170, w: 18, h: 18},
-  ];
-
   let last = performance.now();
   requestAnimationFrame(function loop(now){
     const dt = Math.min(0.033, (now - last) / 1000);
@@ -195,11 +185,8 @@
   });
 
   function update(dt) {
-    // If PDF overlay is up, freeze game input/movement
-    if (overlay.classList.contains("show")) {
-      // still animate particles slowly if you want; here we just keep them static
-      return;
-    }
+    // Freeze movement while PDF overlay is open
+    if (overlay.classList.contains("show")) return;
 
     // Movement
     let mx = 0, my = 0;
@@ -212,7 +199,7 @@
     if (left) mx -= 1;
     if (right) mx += 1;
 
-    if (mx !== 0 || my !== 0) {
+    if (mx || my) {
       const len = Math.hypot(mx, my) || 1;
       mx /= len; my /= len;
 
@@ -220,21 +207,21 @@
       else elf.dir = (mx < 0 ? "left" : "right");
 
       const next = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
-      next.x += mx * elf.speed * dt;
-      next.x = clamp(next.x, 2, 320 - elf.w - 2);
 
+      // X move
+      next.x = clamp(next.x + mx * elf.speed * dt, 2, 320 - elf.w - 2);
       let blockedX = false;
       for (const w of walls) if (rectsOverlap(next, w)) { blockedX = true; break; }
       if (!blockedX) elf.x = next.x;
 
+      // Y move
       next.x = elf.x;
-      next.y += my * elf.speed * dt;
-      next.y = clamp(next.y, 2, 240 - elf.h - 2);
-
+      next.y = clamp(next.y + my * elf.speed * dt, 2, 240 - elf.h - 2);
       let blockedY = false;
       for (const w of walls) if (rectsOverlap(next, w)) { blockedY = true; break; }
       if (!blockedY) elf.y = next.y;
 
+      // Walk animation
       elf.stepTimer += dt;
       if (elf.stepTimer > 0.12) { elf.stepTimer = 0; elf.step = (elf.step + 1) % 2; }
     } else {
@@ -247,33 +234,31 @@
       if (bannerTimer <= 0) { bannerText = ""; bannerTimer = 0; }
     }
 
-    // Interact (E)
+    // Interact on E
     if (keys.has("e")) {
       const elfRect = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
 
       for (const p of presents) {
         if (p.opened) continue;
-
         const zone = { x: p.x - 6, y: p.y - 6, w: p.w + 12, h: p.h + 12 };
+
         if (rectsOverlap(elfRect, zone)) {
-          // Open it
           p.opened = true;
           p.openAnim = 0;
-          spawnSparkles(p.x + p.w/2, p.y + p.h/2);
+          spawnSparkles(p.x + p.w/2, p.y + p.h/2, 18);
 
           if (p.kind === "wrong") {
             showBanner("OOPS WRONG GIFT!", 2.4);
           } else {
             showBanner("YES! CORRECT GIFT!", 1.2);
-            // show the PDF after a tiny beat
-            setTimeout(() => showPdfOverlay(), 350);
+            setTimeout(showPdfOverlay, 350);
           }
           break;
         }
       }
     }
 
-    // Present open animations
+    // Present opening animation
     for (const p of presents) {
       if (p.opened && p.openAnim < 1) {
         p.openAnim = Math.min(1, p.openAnim + dt * 2.2);
@@ -305,7 +290,7 @@
     // Trees
     for (const w of walls) drawTree(w.x, w.y);
 
-    // Presents
+    // ✅ Draw ALL presents
     for (const p of presents) drawPresent(p);
 
     // Elf
@@ -318,7 +303,7 @@
       ctx.fillRect(p.x|0, p.y|0, p.size, p.size);
     }
 
-    // Interaction prompts for nearby unopened presents
+    // Prompt if near any unopened present
     const elfRect = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
     for (const p of presents) {
       if (p.opened) continue;
@@ -329,7 +314,7 @@
       }
     }
 
-    // Banner text
+    // Banner
     if (bannerText) {
       ctx.save();
       ctx.fillStyle = "rgba(0,0,0,0.45)";
@@ -379,7 +364,7 @@
     ctx.fillStyle = "rgba(0,0,0,0.18)";
     ctx.fillRect(p.x+1, p.y+9, p.w, 4);
 
-    // Color-code wrong vs correct slightly (still festive)
+    // Wrong gifts are blue, correct is red
     const boxColor = (p.kind === "correct") ? "#c4312f" : "#2f6fd6";
     const lidColor = (p.kind === "correct") ? "#b12828" : "#285fb6";
 
