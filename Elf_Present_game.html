@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Elf & Present (Top-Down 16-bit-ish)</title>
+  <style>
+    html, body { height: 100%; margin: 0; background:#0b1020; display:grid; place-items:center; }
+    canvas { image-rendering: pixelated; image-rendering: crisp-edges; border: 2px solid #2b3355; background:#0f1730; }
+    .hud {
+      width: min(640px, 94vw);
+      color: #cfe3ff;
+      font: 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin-top: 10px;
+      opacity: 0.95;
+      text-align: center;
+    }
+    kbd {
+      background:#1e2644; border:1px solid #3a4475; border-bottom-color:#252f57;
+      padding:2px 6px; border-radius:6px; font-weight:600;
+    }
+  </style>
+</head>
+<body>
+  <div>
+    <canvas id="game" width="320" height="240"></canvas>
+    <div class="hud">
+      Move: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or Arrow Keys • Open present: <kbd>E</kbd>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  // Scale the "pixel" look up on bigger screens while keeping crisp pixels
+  const BASE_W = canvas.width, BASE_H = canvas.height;
+  function fit() {
+    const maxW = Math.min(640, window.innerWidth * 0.94);
+    const maxH = Math.min(480, window.innerHeight * 0.75);
+    const s = Math.max(1, Math.floor(Math.min(maxW / BASE_W, maxH / BASE_H)));
+    canvas.style.width = (BASE_W * s) + "px";
+    canvas.style.height = (BASE_H * s) + "px";
+  }
+  window.addEventListener("resize", fit);
+  fit();
+
+  // Input
+  const keys = new Set();
+  window.addEventListener("keydown", (e) => {
+    keys.add(e.key.toLowerCase());
+    // prevent page scrolling for arrows
+    if (["arrowup","arrowdown","arrowleft","arrowright"," "].includes(e.key.toLowerCase())) e.preventDefault();
+  });
+  window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+
+  // World
+  const world = {
+    w: BASE_W,
+    h: BASE_H,
+    // snowy tiles just for vibe
+    tile: 16
+  };
+
+  // Utility
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const rectsOverlap = (a,b) =>
+    a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+  // Elf sprite (tiny pixel character)
+  const elf = {
+    x: 152, y: 200,
+    w: 12, h: 14,
+    speed: 70, // px/s
+    dir: "up", // for animation
+    step: 0,
+    stepTimer: 0
+  };
+
+  const present = {
+    x: 154, y: 70,
+    w: 14, h: 12,
+    opened: false,
+    openAnim: 0 // 0..1
+  };
+
+  const particles = [];
+
+  function spawnSparkles(cx, cy, n=18) {
+    for (let i=0;i<n;i++){
+      particles.push({
+        x: cx + (Math.random()*10-5),
+        y: cy + (Math.random()*8-4),
+        vx: (Math.random()*2-1) * 35,
+        vy: -(20 + Math.random()*55),
+        life: 0.6 + Math.random()*0.5,
+        t: 0,
+        size: 1 + Math.floor(Math.random()*2)
+      });
+    }
+  }
+
+  // Simple collision walls (a couple trees so it feels like a "map")
+  const walls = [
+    {x: 40, y: 40, w: 18, h: 18},
+    {x: 260, y: 54, w: 18, h: 18},
+    {x: 62, y: 150, w: 18, h: 18},
+    {x: 242, y: 170, w: 18, h: 18},
+  ];
+
+  // Game loop
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+
+    update(dt);
+    draw();
+
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  function update(dt) {
+    // Movement
+    let mx = 0, my = 0;
+    const up = keys.has("w") || keys.has("arrowup");
+    const down = keys.has("s") || keys.has("arrowdown");
+    const left = keys.has("a") || keys.has("arrowleft");
+    const right = keys.has("d") || keys.has("arrowright");
+    if (up) my -= 1;
+    if (down) my += 1;
+    if (left) mx -= 1;
+    if (right) mx += 1;
+
+    if (mx !== 0 || my !== 0) {
+      const len = Math.hypot(mx, my) || 1;
+      mx /= len; my /= len;
+
+      // Direction preference for animation
+      if (Math.abs(my) >= Math.abs(mx)) elf.dir = (my < 0 ? "up" : "down");
+      else elf.dir = (mx < 0 ? "left" : "right");
+
+      // Attempt move with simple axis separation
+      const next = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
+      next.x += mx * elf.speed * dt;
+      next.x = clamp(next.x, 2, world.w - elf.w - 2);
+
+      // collide X
+      let blockedX = false;
+      for (const w of walls) {
+        if (rectsOverlap(next, w)) { blockedX = true; break; }
+      }
+      if (!blockedX) elf.x = next.x;
+
+      next.x = elf.x;
+      next.y += my * elf.speed * dt;
+      next.y = clamp(next.y, 2, world.h - elf.h - 2);
+
+      // collide Y
+      let blockedY = false;
+      for (const w of walls) {
+        if (rectsOverlap(next, w)) { blockedY = true; break; }
+      }
+      if (!blockedY) elf.y = next.y;
+
+      // walk animation timing
+      elf.stepTimer += dt;
+      if (elf.stepTimer > 0.12) {
+        elf.stepTimer = 0;
+        elf.step = (elf.step + 1) % 2;
+      }
+    } else {
+      elf.step = 0;
+      elf.stepTimer = 0;
+    }
+
+    // Open present when near and pressing E
+    const e = keys.has("e");
+    if (e && !present.opened) {
+      // "interaction zone" slightly bigger than present
+      const zone = { x: present.x - 6, y: present.y - 6, w: present.w + 12, h: present.h + 12 };
+      const elfRect = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
+      if (rectsOverlap(elfRect, zone)) {
+        present.opened = true;
+        present.openAnim = 0;
+        spawnSparkles(present.x + present.w/2, present.y + present.h/2);
+      }
+    }
+
+    // Present open animation
+    if (present.opened && present.openAnim < 1) {
+      present.openAnim = Math.min(1, present.openAnim + dt * 2.2);
+      if (Math.random() < 0.12) {
+        spawnSparkles(present.x + present.w/2, present.y + present.h/2, 2);
+      }
+    }
+
+    // Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.t += dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 140 * dt; // gravity
+      if (p.t >= p.life) particles.splice(i, 1);
+    }
+  }
+
+  function draw() {
+    // Background: snowy tiles
+    ctx.clearRect(0,0,world.w,world.h);
+    for (let y=0; y<world.h; y+=world.tile){
+      for (let x=0; x<world.w; x+=world.tile){
+        const alt = ((x/world.tile + y/world.tile) % 2) === 0;
+        ctx.fillStyle = alt ? "#e6f3ff" : "#d7ecff";
+        ctx.fillRect(x,y,world.tile,world.tile);
+
+        // tiny blue shadows flecks
+        if (alt && Math.random() < 0.03) {
+          ctx.fillStyle = "rgba(40,80,160,0.18)";
+          ctx.fillRect(x + 2 + (Math.random()*10|0), y + 2 + (Math.random()*10|0), 2, 2);
+        }
+      }
+    }
+
+    // Draw "trees" (walls)
+    for (const w of walls) drawTree(w.x, w.y);
+
+    // Draw present
+    drawPresent(present);
+
+    // Draw elf
+    drawElf(elf);
+
+    // UI prompt near present if close and not opened
+    if (!present.opened) {
+      const zone = { x: present.x - 10, y: present.y - 10, w: present.w + 20, h: present.h + 20 };
+      const elfRect = { x: elf.x, y: elf.y, w: elf.w, h: elf.h };
+      if (rectsOverlap(elfRect, zone)) {
+        drawTextCentered("Press E to open!", present.x + present.w/2, present.y - 10);
+      }
+    } else if (present.openAnim >= 1) {
+      drawTextCentered("🎁 Opened!", present.x + present.w/2, present.y - 10);
+    }
+
+    // Particles (sparkles)
+    for (const p of particles) {
+      const a = 1 - (p.t / p.life);
+      ctx.fillStyle = `rgba(255, 246, 180, ${a})`;
+      ctx.fillRect(p.x|0, p.y|0, p.size, p.size);
+      // little cross sparkle sometimes
+      if (a > 0.6 && (p.t * 60 % 8) < 1) {
+        ctx.fillRect((p.x-2)|0, (p.y)|0, 1, 1);
+        ctx.fillRect((p.x+2)|0, (p.y)|0, 1, 1);
+        ctx.fillRect((p.x)|0, (p.y-2)|0, 1, 1);
+        ctx.fillRect((p.x)|0, (p.y+2)|0, 1, 1);
+      }
+    }
+
+    // Subtle vignette
+    const g = ctx.createRadialGradient(world.w/2, world.h/2, 40, world.w/2, world.h/2, 170);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, "rgba(0,0,0,0.25)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,world.w,world.h);
+  }
+
+  function drawTextCentered(text, x, y) {
+    ctx.save();
+    ctx.font = "10px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillText(text, x+1, y+1);
+    ctx.fillStyle = "#1a2240";
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  function drawTree(x, y) {
+    // trunk
+    ctx.fillStyle = "#6b3f2a";
+    ctx.fillRect(x+7, y+11, 4, 6);
+    // leaves
+    ctx.fillStyle = "#1f7a3a";
+    ctx.fillRect(x+2, y+2, 14, 10);
+    ctx.fillStyle = "#2aa24b";
+    ctx.fillRect(x+4, y+4, 10, 6);
+    // snow cap
+    ctx.fillStyle = "#f3fbff";
+    ctx.fillRect(x+3, y+1, 12, 3);
+    // collision outline hint
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.fillRect(x, y, 18, 18);
+  }
+
+  function drawPresent(p) {
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    ctx.fillRect(p.x+1, p.y+9, p.w, 4);
+
+    // box
+    ctx.fillStyle = "#c4312f"; // red
+    ctx.fillRect(p.x, p.y+2, p.w, p.h);
+
+    // ribbon
+    ctx.fillStyle = "#f0d35a"; // gold
+    ctx.fillRect(p.x + (p.w/2|0) - 1, p.y+2, 2, p.h);
+    ctx.fillRect(p.x, p.y + 6, p.w, 2);
+
+    // lid (opens)
+    const t = p.openAnim; // 0..1
+    if (!p.opened) {
+      ctx.fillStyle = "#b12828";
+      ctx.fillRect(p.x-1, p.y, p.w+2, 4);
+    } else {
+      // lid flips upward (simple fake: move + shrink)
+      const lift = (t * 10);
+      const shrink = (t * 6);
+      ctx.fillStyle = "#b12828";
+      ctx.fillRect((p.x-1 + shrink/2)|0, (p.y - lift)|0, (p.w+2 - shrink)|0, 4);
+    }
+
+    // bow
+    ctx.fillStyle = "#f6e07a";
+    ctx.fillRect(p.x + (p.w/2|0) - 3, p.y - 1, 2, 2);
+    ctx.fillRect(p.x + (p.w/2|0) + 1, p.y - 1, 2, 2);
+  }
+
+  function drawElf(e) {
+    // Tiny top-down pixel sprite:
+    // - green dress, red hair, pale face, brown boots
+    // - step animation: feet swap 1px
+    const step = e.step;
+
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    ctx.fillRect((e.x+2)|0, (e.y+12)|0, 8, 3);
+
+    // boots
+    ctx.fillStyle = "#4a2b1b";
+    ctx.fillRect((e.x+2)|0, (e.y+11 + step)|0, 3, 3);
+    ctx.fillRect((e.x+7)|0, (e.y+11 + (1-step))|0, 3, 3);
+
+    // dress/body
+    ctx.fillStyle = "#2aa24b";
+    ctx.fillRect((e.x+2)|0, (e.y+6)|0, 8, 6);
+
+    // belt
+    ctx.fillStyle = "#1a1a1a";
+    ctx.fillRect((e.x+2)|0, (e.y+9)|0, 8, 1);
+
+    // arms (tiny)
+    ctx.fillStyle = "#2fbd57";
+    ctx.fillRect((e.x+1)|0, (e.y+7)|0, 1, 2);
+    ctx.fillRect((e.x+10)|0, (e.y+7)|0, 1, 2);
+
+    // face
+    ctx.fillStyle = "#ffd7c7";
+    ctx.fillRect((e.x+3)|0, (e.y+2)|0, 6, 4);
+
+    // hair (red)
+    ctx.fillStyle = "#d2462e";
+    ctx.fillRect((e.x+2)|0, (e.y+1)|0, 8, 3);
+    ctx.fillRect((e.x+2)|0, (e.y+2)|0, 1, 3);
+    ctx.fillRect((e.x+9)|0, (e.y+2)|0, 1, 3);
+
+    // hat (elf green cap)
+    ctx.fillStyle = "#1f7a3a";
+    ctx.fillRect((e.x+4)|0, (e.y)|0, 4, 2);
+    ctx.fillRect((e.x+7)|0, (e.y+1)|0, 2, 1);
+
+    // eyes (tiny dots)
+    ctx.fillStyle = "#1a2240";
+    ctx.fillRect((e.x+4)|0, (e.y+3)|0, 1, 1);
+    ctx.fillRect((e.x+7)|0, (e.y+3)|0, 1, 1);
+
+    // direction indicator: tiny “nose” pixel
+    ctx.fillStyle = "#f2b6a0";
+    if (e.dir === "up") ctx.fillRect((e.x+6)|0, (e.y+2)|0, 1, 1);
+    if (e.dir === "down") ctx.fillRect((e.x+6)|0, (e.y+5)|0, 1, 1);
+    if (e.dir === "left") ctx.fillRect((e.x+3)|0, (e.y+4)|0, 1, 1);
+    if (e.dir === "right") ctx.fillRect((e.x+8)|0, (e.y+4)|0, 1, 1);
+  }
+})();
+</script>
+</body>
+</html>
